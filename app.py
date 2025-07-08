@@ -3,7 +3,7 @@ import os
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = "nspire_2k25_X8rT9VwqLm"
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 
 @app.route("/", methods=["GET"])
 def home():
@@ -21,7 +21,6 @@ def webhook():
         else:
             return "Forbidden", 403
 
-    # Optionally handle POST for messages later
     return "OK", 200
 
 if __name__ == "__main__":
