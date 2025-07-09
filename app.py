@@ -18,7 +18,7 @@ raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 clean_id = re.sub(r"\D", "", raw_id)
 PHONE_NUMBER_ID = clean_id.zfill(15)[:15]
 
-# Abuse tracker (simple memory-based)
+# Abuse tracker (in-memory)
 abuse_tracker = {}
 
 @app.route("/", methods=["GET"])
@@ -62,7 +62,7 @@ def webhook():
                             abuse_tracker[from_number] = abuse_tracker.get(from_number, 0) + 1
                             send_whatsapp_message(
                                 from_number,
-                                "⚠️ Let's keep this respectful. We're here to assist you with official citizen services."
+                                "⚠️ Let’s keep this respectful. We're here to assist you with official citizen services."
                             )
                             return "OK", 200
 
@@ -74,12 +74,8 @@ def webhook():
                             )
                             return "OK", 200
 
-                        # ✅ Valid service intent
-                        if is_apply_intent(message_text):
-                            reply = "✅ This service is available. Please visit our centre for professional assistance."
-                        else:
-                            reply = generate_openai_reply(message_text)
-
+                        # ✅ Valid service query — summarize first
+                        reply = summarize_user_need(message_text)
                         send_whatsapp_message(from_number, reply)
 
         return "OK", 200
@@ -113,7 +109,7 @@ def classify_intent(user_text):
         print("⚠️ Intent classification failed:", e)
         return "irrelevant"
 
-# ✅ Detect apply-related messages
+# ✅ Optional keyword fallback
 def is_apply_intent(text):
     keywords = [
         "apply", "certificate", "upload", "how to", "form", "cheyyanam",
@@ -121,8 +117,8 @@ def is_apply_intent(text):
     ]
     return any(word.lower() in text.lower() for word in keywords)
 
-# 🤖 GPT-generated clarifications (no how-to)
-def generate_openai_reply(user_text):
+# 🤖 Summary generator (instead of full GPT response)
+def summarize_user_need(user_text):
     try:
         response = client.chat.completions.create(
             model="gpt-4.1-nano",
@@ -130,22 +126,22 @@ def generate_openai_reply(user_text):
                 {
                     "role": "system",
                     "content": (
-                        "You are a professional assistant for Njanambika Tech Spire, working with Akshaya CSC centres. "
-                        "Your job is to politely clarify the purpose of certificates or services. "
-                        "NEVER explain how to apply, upload, or complete online steps. "
-                        "If asked, reply: 'Please visit our centre for complete support.' "
-                        "Maintain a respectful, natural tone. Be short, polite, and helpful."
+                        "You are a receptionist assistant. "
+                        "Your job is to read the user's message and professionally summarize what they are requesting "
+                        "— such as a certificate, clarification, or service. "
+                        "Summarize briefly and politely say: "
+                        "'You’re requesting: ...' then add: 'Our customer executive will contact you shortly.'"
                     )
                 },
                 {"role": "user", "content": user_text}
             ],
-            max_tokens=150,
+            max_tokens=100,
             temperature=0.5
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print("⚠️ OpenAI Error:", e)
-        return "Sorry, I’m unable to respond right now. Please try again later."
+        print("⚠️ Summarization error:", e)
+        return "Thank you for your message. Our customer executive will contact you shortly."
 
 # 📤 WhatsApp reply
 def send_whatsapp_message(to_number, text):
