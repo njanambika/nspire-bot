@@ -6,18 +6,20 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# Load environment variables
+# Environment variables
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "").strip()
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Clean phone number ID
+# Phone number ID cleanup
 raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 clean_id = re.sub(r"\D", "", raw_id)
 PHONE_NUMBER_ID = clean_id.zfill(15)[:15]
 
+# Abuse tracking (simple in-memory for demo)
+abuse_tracker = {}
 
 @app.route("/", methods=["GET"])
 def home():
@@ -48,25 +50,37 @@ def webhook():
                     for message in messages:
                         from_number = message["from"]
                         message_type = message.get("type", "")
-                        
-                        # ❌ Voice note check
+                        message_text = message.get("text", {}).get("body", "").strip()
+
+                        # 🎙️ Block voice messages
                         if message_type == "audio":
                             send_whatsapp_message(from_number, "🎙️ Voice messages not supported. Kindly type your query.")
                             return "OK", 200
-                        
-                        # 📝 Text check
-                        message_text = message.get("text", {}).get("body", "").strip()
 
-                        # 🚫 Block irrelevant/abusive input
-                        if is_irrelevant_or_abusive(message_text):
-                            send_whatsapp_message(from_number, "🙏 I’m here to help with citizen services. Please ask about a service or certificate.")
+                        # 🚫 Handle irrelevant or abusive input
+                        if is_irrelevant(message_text):
+                            send_whatsapp_message(from_number, "🙏 I’m here to assist with citizen services. Please ask about services or certificates.")
                             return "OK", 200
 
-                        # 🔍 Check intent
+                        if is_abusive(message_text):
+                            abuse_tracker[from_number] = abuse_tracker.get(from_number, 0) + 1
+                            if abuse_tracker[from_number] >= 2:
+                                send_whatsapp_message(from_number, "🚫 Conversation ended due to repeated offensive messages. Please contact staff.")
+                                # Optionally: Notify staff
+                                return "OK", 200
+                            else:
+                                send_whatsapp_message(from_number, "⚠️ Please be respectful. I’m here to help with services.")
+                                return "OK", 200
+
+                        # 📂 Handle document/image messages (future)
+                        if message_type in ["image", "document"]:
+                            send_whatsapp_message(from_number, "📁 Document received. Our team will check and assist you.")
+                            return "OK", 200
+
+                        # ✅ If service intent detected
                         if is_apply_intent(message_text):
-                            reply = "✅ This service is available. Please visit our centre for full support and professional assistance."
+                            reply = "✅ This service is available. Please visit our centre for professional support."
                         else:
-                            # 🧠 Use GPT only for valid clarification
                             reply = generate_openai_reply(message_text)
 
                         send_whatsapp_message(from_number, reply)
@@ -76,17 +90,23 @@ def webhook():
 
 # 🔍 Keyword intent detector
 def is_apply_intent(text):
-    keywords = ["apply", "income", "birth", "certificate", "upload", "cheyyanam", "varumana", "epass", "how to", "form"]
+    keywords = ["apply", "certificate", "upload", "how to", "form", "cheyyanam", "varumana", "submit", "register", "income", "birth", "online"]
     return any(word.lower() in text.lower() for word in keywords)
 
 
-# 🚫 Irrelevant / abusive check
-def is_irrelevant_or_abusive(text):
-    banned = ["who is pm", "joke", "weather", "sex", "xxx", "stupid", "idiot", "modi", "pinarayi", "politics"]
-    return any(b in text.lower() for b in banned)
+# 🚫 Block irrelevant or joke topics
+def is_irrelevant(text):
+    irrelevant = ["joke", "weather", "song", "story", "who is pm", "movie", "modi", "pinarayi"]
+    return any(word in text.lower() for word in irrelevant)
 
 
-# 🧠 GPT to clarify only, not guide
+# 🛑 Detect abuse or political provocation
+def is_abusive(text):
+    abusive = ["idiot", "stupid", "fool", "waste", "bloody", "sex", "xxx", "fake", "nonsense", "politics", "bjp", "congress", "communist"]
+    return any(word in text.lower() for word in abusive)
+
+
+# 🧠 GPT – Clarify, never teach steps
 def generate_openai_reply(user_text):
     try:
         response = client.chat.completions.create(
@@ -95,10 +115,12 @@ def generate_openai_reply(user_text):
                 {
                     "role": "system",
                     "content": (
-                        "You are a helpful assistant for Njanambika Tech Spire in partnership with Akshaya CSC centres. "
-                        "Only clarify what a certificate or process means. Do NOT explain how to apply or do online steps. "
-                        "If asked for 'how', just say 'Please visit our centre for full support.' "
-                        "Be natural, respectful, and keep replies short and local-friendly."
+                        "You are a helpful assistant for Njanambika Tech Spire, working with Akshaya CSC centres. "
+                        "Your job is to clarify citizen doubts in a human tone. "
+                        "You can explain what a certificate means, or who might need it. "
+                        "NEVER explain how to apply, where to upload, or give online steps. "
+                        "For any such request, say: 'Please visit our centre for complete support.' "
+                        "Be respectful, short, and encourage offline help."
                     )
                 },
                 {"role": "user", "content": user_text}
@@ -112,7 +134,7 @@ def generate_openai_reply(user_text):
         return "Sorry, I’m unable to respond right now. Please try again later."
 
 
-# 📤 WhatsApp reply sender
+# 📤 Send message to WhatsApp
 def send_whatsapp_message(to_number, text):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
