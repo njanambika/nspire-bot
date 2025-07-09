@@ -28,34 +28,32 @@ def webhook():
         data = request.get_json()
         print("📩 Incoming Webhook Payload:", data)
 
-        try:
-            message = data["entry"][0]["changes"][0]["value"]["messages"][0]
-            sender_id = message["from"]
+        if data.get("object") == "whatsapp_business_account":
+            for entry in data.get("entry", []):
+                for change in entry.get("changes", []):
+                    value = change.get("value", {})
+                    messages = value.get("messages", [])
+                    for message in messages:
+                        from_number = message["from"]
+                        message_text = message.get("text", {}).get("body", "")
 
-            # Auto-reply message
-            send_message(sender_id, "Thanks for messaging, will be replied shortly.")
-        except Exception as e:
-            print("⚠️ Auto-reply error:", str(e))
+                        # Send auto-reply
+                        url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+                        headers = {
+                            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+                            "Content-Type": "application/json"
+                        }
+                        payload = {
+                            "messaging_product": "whatsapp",
+                            "to": from_number,
+                            "type": "text",
+                            "text": { "body": "Thanks for messaging, will be replied shortly." }
+                        }
+
+                        response = requests.post(url, headers=headers, json=payload)
+                        print("📤 Auto-reply sent. Response:", response.status_code, response.text)
 
         return "OK", 200
-
-def send_message(to, text):
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {
-            "body": text
-        }
-    }
-
-    response = requests.post(url, headers=headers, json=payload)
-    print("📤 Auto-reply sent. Response:", response.status_code, response.text)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
