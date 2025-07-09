@@ -2,23 +2,22 @@ from flask import Flask, request
 import os
 import re
 import requests
+import openai
 
 app = Flask(__name__)
 
 # Load and sanitize environment variables
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "").strip()
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+
+# Set OpenAI key
+openai.api_key = OPENAI_API_KEY
 
 # Validate and clean PHONE_NUMBER_ID
 raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
-clean_id = re.sub(r"\D", "", raw_id)  # Keep only digits
-
-if len(clean_id) < 15:
-    clean_id = clean_id.zfill(15)  # Pad with leading zeros
-elif len(clean_id) > 15:
-    clean_id = clean_id[:15]  # Truncate to 15 digits
-
-PHONE_NUMBER_ID = clean_id
+clean_id = re.sub(r"\D", "", raw_id)
+PHONE_NUMBER_ID = clean_id.zfill(15)[:15]
 
 
 @app.route("/", methods=["GET"])
@@ -51,25 +50,48 @@ def webhook():
                         from_number = message["from"]
                         message_text = message.get("text", {}).get("body", "")
 
-                        # Prepare auto-reply
-                        url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-                        headers = {
-                            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-                            "Content-Type": "application/json"
-                        }
-                        payload = {
-                            "messaging_product": "whatsapp",
-                            "to": from_number,
-                            "type": "text",
-                            "text": {
-                                "body": "Thanks for messaging, will be replied shortly."
-                            }
-                        }
+                        # 🔍 Generate reply from GPT-4.1-nano
+                        ai_reply = generate_openai_reply(message_text)
 
-                        response = requests.post(url, headers=headers, json=payload)
-                        print("📤 Auto-reply sent. Response:", response.status_code, response.text)
+                        # 💬 Send back to WhatsApp
+                        send_whatsapp_message(from_number, ai_reply)
 
         return "OK", 200
+
+
+def generate_openai_reply(user_text):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4.1-nano",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant for government services."},
+                {"role": "user", "content": user_text}
+            ],
+            max_tokens=150,
+            temperature=0.5,
+        )
+        return response["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print("⚠️ OpenAI error:", e)
+        return "Sorry, I'm unable to respond right now. Please try again shortly."
+
+
+def send_whatsapp_message(to_number, text):
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_number,
+        "type": "text",
+        "text": {
+            "body": text
+        }
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    print("📤 WhatsApp reply sent:", response.status_code, response.text)
 
 
 if __name__ == "__main__":
