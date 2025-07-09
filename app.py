@@ -1,12 +1,11 @@
 from flask import Flask, request
 import os
 import requests
-import json
 
 app = Flask(__name__)
 
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
-WHATSAPP_TOKEN = os.environ.get("PERMANENT_TOKEN")
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 
 @app.route("/", methods=["GET"])
@@ -25,33 +24,33 @@ def webhook():
         else:
             return "Forbidden", 403
 
-    elif request.method == "POST":
+    if request.method == "POST":
         data = request.get_json()
-        print("📩 Incoming Webhook Payload:", json.dumps(data, indent=2))
+        print("📩 Incoming Webhook Payload:", data)
 
-        # Extract sender info
         try:
-            phone_number = data["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
-            send_auto_reply(phone_number)
+            message = data["entry"][0]["changes"][0]["value"]["messages"][0]
+            sender_id = message["from"]
+
+            # Auto-reply message
+            send_message(sender_id, "Thanks for messaging, will be replied shortly.")
         except Exception as e:
-            print("❌ Error extracting message or sending reply:", e)
+            print("⚠️ Auto-reply error:", str(e))
 
-        return "EVENT_RECEIVED", 200
+        return "OK", 200
 
-    return "Method not allowed", 405
-
-def send_auto_reply(recipient_number):
-    url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
+def send_message(to, text):
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json"
     }
     payload = {
         "messaging_product": "whatsapp",
-        "to": recipient_number,
+        "to": to,
         "type": "text",
         "text": {
-            "body": "Thanks for messaging, will be replied shortly."
+            "body": text
         }
     }
 
