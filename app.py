@@ -18,7 +18,7 @@ raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 clean_id = re.sub(r"\D", "", raw_id)
 PHONE_NUMBER_ID = clean_id.zfill(15)[:15]
 
-# Abuse tracker (in-memory)
+# Abuse tracker
 abuse_tracker = {}
 
 @app.route("/", methods=["GET"])
@@ -49,15 +49,14 @@ def webhook():
                         message_type = message.get("type", "")
                         message_text = message.get("text", {}).get("body", "").strip()
 
-                        # 🎙️ Handle voice note
+                        # 🎙️ Voice note block
                         if message_type == "audio":
                             send_whatsapp_message(from_number, "🎙️ Voice messages are not supported. Kindly type your query so we can assist you better.")
                             return "OK", 200
 
-                        # 🧠 Step 1: Detect intent
+                        # 🧠 Detect intent
                         intent = classify_intent(message_text)
 
-                        # 🛑 Handle abusive input — warn only
                         if intent == "abuse":
                             abuse_tracker[from_number] = abuse_tracker.get(from_number, 0) + 1
                             send_whatsapp_message(
@@ -66,7 +65,6 @@ def webhook():
                             )
                             return "OK", 200
 
-                        # 🧽 Handle off-topic input
                         if intent == "irrelevant":
                             send_whatsapp_message(
                                 from_number,
@@ -74,8 +72,8 @@ def webhook():
                             )
                             return "OK", 200
 
-                        # ✅ Valid service query — summarize first
-                        reply = summarize_user_need(message_text)
+                        # ✅ Provide structured service overview
+                        reply = overview_service_reply(message_text)
                         send_whatsapp_message(from_number, reply)
 
         return "OK", 200
@@ -109,16 +107,8 @@ def classify_intent(user_text):
         print("⚠️ Intent classification failed:", e)
         return "irrelevant"
 
-# ✅ Optional keyword fallback
-def is_apply_intent(text):
-    keywords = [
-        "apply", "certificate", "upload", "how to", "form", "cheyyanam",
-        "varumana", "submit", "register", "income", "birth", "online"
-    ]
-    return any(word.lower() in text.lower() for word in keywords)
-
-# 🤖 Summary generator (instead of full GPT response)
-def summarize_user_need(user_text):
+# 🧠 GPT-generated structured service overview
+def overview_service_reply(user_text):
     try:
         response = client.chat.completions.create(
             model="gpt-4.1-nano",
@@ -126,24 +116,27 @@ def summarize_user_need(user_text):
                 {
                     "role": "system",
                     "content": (
-                        "You are a receptionist assistant. "
-                        "Your job is to read the user's message and professionally summarize what they are requesting "
-                        "— such as a certificate, clarification, or service. "
-                        "Summarize briefly and politely say: "
-                        "'You’re requesting: ...' then add: 'Our customer executive will contact you shortly.'"
+                        "You are a citizen service assistant for Njanambika Tech Spire. "
+                        "When a user asks about a service (e.g. income certificate, NCL, caste certificate, e-district), respond in the following format:\n\n"
+                        "✅ *Service:* \n"
+                        "🧾 *Eligibility:* \n"
+                        "📑 *Documents:* \n"
+                        "📆 *Last Date:* (If unknown, say 'No specific deadline')\n"
+                        "📍 *Next Step:* Please visit our centre for guided assistance.\n\n"
+                        "Avoid giving step-by-step application instructions."
                     )
                 },
                 {"role": "user", "content": user_text}
             ],
-            max_tokens=100,
+            max_tokens=200,
             temperature=0.5
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print("⚠️ Summarization error:", e)
-        return "Thank you for your message. Our customer executive will contact you shortly."
+        print("⚠️ Overview reply error:", e)
+        return "Thank you for your message. Please visit our centre for full assistance."
 
-# 📤 WhatsApp reply
+# 📤 Send WhatsApp message
 def send_whatsapp_message(to_number, text):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
