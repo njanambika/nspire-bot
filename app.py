@@ -1,16 +1,30 @@
 from flask import Flask, request
 import os
+import re
 import requests
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
+# Load and sanitize environment variables
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "").strip()
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
-PHONE_NUMBER_ID = "696294383566912"
+
+# Validate and clean PHONE_NUMBER_ID
+raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
+clean_id = re.sub(r"\D", "", raw_id)  # Keep only digits
+
+if len(clean_id) < 15:
+    clean_id = clean_id.zfill(15)  # Pad with leading zeros
+elif len(clean_id) > 15:
+    clean_id = clean_id[:15]  # Truncate to 15 digits
+
+PHONE_NUMBER_ID = clean_id
+
 
 @app.route("/", methods=["GET"])
 def home():
     return "✅ Nspire Bot is running!"
+
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
@@ -37,7 +51,7 @@ def webhook():
                         from_number = message["from"]
                         message_text = message.get("text", {}).get("body", "")
 
-                        # Send auto-reply
+                        # Prepare auto-reply
                         url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
                         headers = {
                             "Authorization": f"Bearer {WHATSAPP_TOKEN}",
@@ -47,13 +61,16 @@ def webhook():
                             "messaging_product": "whatsapp",
                             "to": from_number,
                             "type": "text",
-                            "text": { "body": "Thanks for messaging, will be replied shortly." }
+                            "text": {
+                                "body": "Thanks for messaging, will be replied shortly."
+                            }
                         }
 
                         response = requests.post(url, headers=headers, json=payload)
                         print("📤 Auto-reply sent. Response:", response.status_code, response.text)
 
         return "OK", 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
