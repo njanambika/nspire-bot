@@ -11,10 +11,9 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "").strip()
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 
-# Set up OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Clean and format phone number ID
+# Clean phone number ID
 raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 clean_id = re.sub(r"\D", "", raw_id)
 PHONE_NUMBER_ID = clean_id.zfill(15)[:15]
@@ -48,17 +47,46 @@ def webhook():
                     messages = value.get("messages", [])
                     for message in messages:
                         from_number = message["from"]
-                        message_text = message.get("text", {}).get("body", "")
+                        message_type = message.get("type", "")
+                        
+                        # ❌ Voice note check
+                        if message_type == "audio":
+                            send_whatsapp_message(from_number, "🎙️ Voice messages not supported. Kindly type your query.")
+                            return "OK", 200
+                        
+                        # 📝 Text check
+                        message_text = message.get("text", {}).get("body", "").strip()
 
-                        # 🔐 Generate filtered reply
-                        reply = generate_openai_reply(message_text)
+                        # 🚫 Block irrelevant/abusive input
+                        if is_irrelevant_or_abusive(message_text):
+                            send_whatsapp_message(from_number, "🙏 I’m here to help with citizen services. Please ask about a service or certificate.")
+                            return "OK", 200
 
-                        # 📤 Send reply via WhatsApp
+                        # 🔍 Check intent
+                        if is_apply_intent(message_text):
+                            reply = "✅ This service is available. Please visit our centre for full support and professional assistance."
+                        else:
+                            # 🧠 Use GPT only for valid clarification
+                            reply = generate_openai_reply(message_text)
+
                         send_whatsapp_message(from_number, reply)
 
         return "OK", 200
 
 
+# 🔍 Keyword intent detector
+def is_apply_intent(text):
+    keywords = ["apply", "income", "birth", "certificate", "upload", "cheyyanam", "varumana", "epass", "how to", "form"]
+    return any(word.lower() in text.lower() for word in keywords)
+
+
+# 🚫 Irrelevant / abusive check
+def is_irrelevant_or_abusive(text):
+    banned = ["who is pm", "joke", "weather", "sex", "xxx", "stupid", "idiot", "modi", "pinarayi", "politics"]
+    return any(b in text.lower() for b in banned)
+
+
+# 🧠 GPT to clarify only, not guide
 def generate_openai_reply(user_text):
     try:
         response = client.chat.completions.create(
@@ -67,14 +95,11 @@ def generate_openai_reply(user_text):
                 {
                     "role": "system",
                     "content": (
-                                "You are a polite and knowledgeable assistant for a citizen service provider called Njanambika Tech Spire, "
-                                "working with Akshaya CSC centres in Kerala. "
-                                "Your job is to help users understand government services, but never teach them how to apply online or fill forms. "
-                                "If the user asks for eligibility, document meaning, or basic doubts — explain clearly in natural language. "
-                                "If they ask how to apply, upload, register, or do online steps — reply with: "
-                                "'This service is available. Kindly visit our centre for full support.' "
-                                "Avoid giving instructions, links, or step-by-step guides. Be helpful, brief, and build trust in centre assistance."
-                                )
+                        "You are a helpful assistant for Njanambika Tech Spire in partnership with Akshaya CSC centres. "
+                        "Only clarify what a certificate or process means. Do NOT explain how to apply or do online steps. "
+                        "If asked for 'how', just say 'Please visit our centre for full support.' "
+                        "Be natural, respectful, and keep replies short and local-friendly."
+                    )
                 },
                 {"role": "user", "content": user_text}
             ],
@@ -84,9 +109,10 @@ def generate_openai_reply(user_text):
         return response.choices[0].message.content.strip()
     except Exception as e:
         print("⚠️ OpenAI Error:", e)
-        return "Sorry, I’m unable to reply right now. Please try again later."
+        return "Sorry, I’m unable to respond right now. Please try again later."
 
 
+# 📤 WhatsApp reply sender
 def send_whatsapp_message(to_number, text):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
