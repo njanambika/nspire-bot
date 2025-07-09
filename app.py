@@ -14,7 +14,7 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 # Set up OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Clean up phone number ID
+# Clean and format phone number ID
 raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 clean_id = re.sub(r"\D", "", raw_id)
 PHONE_NUMBER_ID = clean_id.zfill(15)[:15]
@@ -50,10 +50,10 @@ def webhook():
                         from_number = message["from"]
                         message_text = message.get("text", {}).get("body", "")
 
-                        # ✨ Call OpenAI to generate reply
+                        # 🔐 Generate filtered reply
                         reply = generate_openai_reply(message_text)
 
-                        # 📤 Send reply to WhatsApp
+                        # 📤 Send reply via WhatsApp
                         send_whatsapp_message(from_number, reply)
 
         return "OK", 200
@@ -64,7 +64,20 @@ def generate_openai_reply(user_text):
         response = client.chat.completions.create(
             model="gpt-4.1-nano",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant for citizen services in India."},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a polite assistant for a citizen service provider named Njanambika Tech Spire, "
+                        "which works in partnership with various Akshaya CSC centres in Kerala. "
+                        "Your job is to engage and build trust — not to teach users how to do government applications themselves. "
+                        "Never provide full step-by-step guidance or links. "
+                        "Instead, respond with polite, short replies like: "
+                        "'Yes, this service is available. Please visit our centre for full support.', "
+                        "'Some parts may be online, but we help ensure it’s done correctly.', or "
+                        "'That step may require document verification. Kindly contact our staff.' "
+                        "Keep answers warm, brief, and professional to encourage centre visits."
+                    )
+                },
                 {"role": "user", "content": user_text}
             ],
             max_tokens=150,
