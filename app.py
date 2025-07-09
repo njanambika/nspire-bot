@@ -6,7 +6,7 @@ app = Flask(__name__)
 
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "").strip()
+PHONE_NUMBER_ID = "696294383566912"
 
 @app.route("/", methods=["GET"])
 def home():
