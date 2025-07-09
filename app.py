@@ -1,15 +1,13 @@
-from flask import Flask
+from flask import Flask, request
 import os
 
 app = Flask(__name__)
 
-# Load environment variable (make sure you set this in Railway under "Variables")
-DUMMY_VAR = os.environ.get("DUMMY_VAR", "Variable not found")
-
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
-    return f"✅ Env Test Successful! DUMMY_VAR = {DUMMY_VAR}"
+    dummy = os.environ.get("DUMMY_VAR", "Variable not found")
+    return f"✅ Env Test Successful! DUMMY_VAR = {dummy}"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Railway sets this automatically
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
