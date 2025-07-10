@@ -16,7 +16,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 PHONE_NUMBER_ID = re.sub(r"\D", "", raw_id).zfill(15)[:15]
 
-# Abuse tracker and session memory
+# Memory
 abuse_tracker = {}
 session_data = {}
 
@@ -46,30 +46,30 @@ def webhook():
                         message_text = message.get("text", {}).get("body", "").strip()
                         message_type = message.get("type", "")
 
-                        # 🎙️ Block voice notes
                         if message_type == "audio":
-                            send_whatsapp_message(from_number, "🎙️ Voice messages are not supported. Kindly type your message.")
+                            send_whatsapp_message(from_number, "🎧 Voice messages are not supported. Kindly type your message.")
                             return "OK", 200
 
-                        # 🧠 Abuse filter
                         if is_abusive(message_text):
                             abuse_tracker[from_number] = abuse_tracker.get(from_number, 0) + 1
                             send_whatsapp_message(from_number, "⚠️ Please be respectful. We’re here to help.")
                             return "OK", 200
 
-                        # 💬 Persona conversation
                         response = handle_persona_flow(from_number, message_text)
                         send_whatsapp_message(from_number, response)
         return "OK", 200
 
-# 🔄 Conversation flow manager
 def handle_persona_flow(user_id, message_text):
     user = session_data.get(user_id, {"step": 1})
 
     if user["step"] == 1:
-        user["name"] = message_text
+        # Name check
+        name = message_text
+        if name.lower() in ["hi", "hello", "hey"]:
+            name = "there"
+        user["name"] = name
         session_data[user_id] = {**user, "step": 2}
-        return f"Nice to meet you, {message_text}! 😊\nIs this application for *yourself* or *someone else*?"
+        return f"Nice to meet you, {name}! 😊\nIs this application for *yourself* or *someone else*?"
 
     if user["step"] == 2:
         user["for_whom"] = message_text
@@ -79,28 +79,24 @@ def handle_persona_flow(user_id, message_text):
     if user["step"] == 3:
         user["service"] = message_text
         session_data[user_id] = {**user, "step": 4}
-
-        # 🎯 Generate final reply based on collected data
         return generate_persona_response(user)
 
-    # Restart if unknown
     session_data[user_id] = {"step": 1}
     return "👋 Hello! May I know your name?"
 
-# 🤖 Persona-based service reply using GPT
 def generate_persona_response(user):
     try:
         prompt = (
-            f"You are a helpful assistant for Njanambika Tech Spire. "
-            f"The citizen's name is {user['name']}. "
-            f"They are applying for a service: {user['service']} "
-            f"for: {user['for_whom']}. "
-            f"Reply with a polite, professional response including:\n"
-            "✅ Service name\n"
-            "🧾 Eligibility\n"
-            "📑 Required documents\n"
-            "📆 Last date (if applicable, otherwise say 'No specific deadline')\n"
-            "📍 End with: Please visit our centre for guided assistance."
+            f"You are a warm and helpful assistant for Njanambika Tech Spire. "
+            f"Make your response feel personal and friendly. The person’s name is {user['name']}, "
+            f"applying for {user['service']} for {user['for_whom']}. "
+            "Reply with a human-style summary that includes:\n\n"
+            "🆔 Service\n"
+            "🨾 Eligibility\n"
+            "📁 Required Documents\n"
+            "📆 Last Date (only if it’s genuinely required)\n"
+            "📍 Close with: 'Kindly visit our centre — we’ll help you complete it confidently.'\n\n"
+            "Skip robotic phrases like 'Dear'. Sound natural, warm, and concise."
         )
         response = client.chat.completions.create(
             model="gpt-4.1-nano",
@@ -113,11 +109,9 @@ def generate_persona_response(user):
         print("⚠️ GPT Error:", e)
         return "Thanks for your details. Our team will help you shortly."
 
-# 🚫 Basic abuse filter
 def is_abusive(text):
     return any(word in text.lower() for word in ["idiot", "stupid", "waste", "xxx", "sex"])
 
-# 📤 Send WhatsApp message
 def send_whatsapp_message(to_number, text):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {
