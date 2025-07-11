@@ -6,7 +6,6 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
-# ENV VARS
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "").strip()
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -53,96 +52,119 @@ def webhook():
                             send_whatsapp_message(from_number, "⚠️ Please be respectful. We’re here to help.")
                             return "OK", 200
 
-                        response = handle_conversation_flow(from_number, message_text)
+                        response = intelligent_flow(from_number, message_text)
                         send_whatsapp_message(from_number, response)
         return "OK", 200
 
-def handle_conversation_flow(user_id, message_text):
-    lower = message_text.strip().lower()
+def intelligent_flow(user_id, message_text):
+    user = session_data.get(user_id, {"step": 1})
 
-    # If user says hi/hello/hey - always start fresh and greet
-    if lower in ["hi", "hello", "hey"]:
-        session_data[user_id] = {"step": 1}
-        return "Hi! I’m Violet. May I know your name? 😊"
+    # --- Session close (polite) ---
+    if message_text.strip().lower() in ["yes", "yeah", "ok", "close", "close session", "end", "end session"]:
+        session_data.pop(user_id, None)
+        return "Thank you for chatting with us! Your session is now closed. If you need anything else, just say hi."
 
-    session = session_data.get(user_id, {})
+    # --- "No more" detection: ask if want to close
+    if message_text.strip().lower() in ["no", "nothing else", "that’s all", "no more", "all clear"]:
+        session_data[user_id] = {"step": 100, "just_asked_to_close": True}
+        return "Can I close this session now?"
 
-    # Step 1: Waiting for name
-    if session.get("step") == 1:
-        name = message_text.strip()
-        session["name"] = name
-        session["step"] = 2
-        session_data[user_id] = session
-        return f"Nice to meet you, {name}! What would you like to know or get help with?"
+    if user.get("just_asked_to_close"):
+        session_data.pop(user_id, None)
+        return "Thank you for chatting with us! Your session is now closed. If you need anything else, just say hi."
 
-    # Step 2: Waiting for need/service/intent
-    if session.get("step") == 2:
-        session["need"] = message_text.strip()
-        session["step"] = 3
-        session_data[user_id] = session
-        return "Is this for yourself or for someone else?"
+    # --- Main flow ---
+    # Step 1: Name
+    if user["step"] == 1:
+        user["name"] = message_text
+        user["step"] = 2
+        session_data[user_id] = user
+        return f"Nice to meet you, {user['name']}! 😊\nIs this application for yourself or someone else?"
 
-    # Step 3: Waiting for self/other
-    if session.get("step") == 3:
-        session["for_whom"] = message_text.strip()
-        session["step"] = 99
-        # Prepare the system prompt & first message in the history
-        history = [
-            {"role": "system", "content":
-                "You are a friendly, helpful assistant at Njanambika Tech Spire, a common service centre. "
-                "Always keep replies under 60 words, use clear, simple language. "
-                "Never explain how to apply online. Only mention who is eligible, what documents are needed, "
-                "and always close with: 'Please visit our centre — we’ll help you with everything.' "
-                "Remember everything the user has asked earlier in this chat and answer follow-up questions accordingly."
-            },
-            {"role": "user", "content":
-                f"My name is {session['name']}. I want help with: {session['need']}. It is for: {session['for_whom']}."
-            }
-        ]
-        session["history"] = history
-        session_data[user_id] = session
-        reply = generate_persona_response(history)
-        history.append({"role": "assistant", "content": reply})
-        session["history"] = history
-        session_data[user_id] = session
-        return reply
+    # Step 2: Self or other
+    if user["step"] == 2:
+        if message_text.strip().lower() in ["me", "myself", "self", "mine"]:
+            user["for_whom"] = "self"
+            user["step"] = 3
+            session_data[user_id] = user
+            return "Great! Which service do you need help with? (e.g., income certificate, caste certificate)"
+        else:
+            user["for_whom"] = "other"
+            user["step"] = 2.5
+            session_data[user_id] = user
+            return "May I know their name?"
 
-    # Step 99: GPT memory chat for followups
-    if session.get("step") == 99:
-        # Session close logic
-        if lower in ["no", "nothing else", "that’s all", "no more", "all clear"]:
-            session["waiting_close_confirm"] = True
-            session_data[user_id] = session
-            return "Can I close this session now?"
+    # Step 2.5: If for someone else, get their name
+    if user["step"] == 2.5:
+        user["other_name"] = message_text
+        user["step"] = 3
+        session_data[user_id] = user
+        return f"Which service does {user['other_name']} need help with?"
 
-        if session.get("waiting_close_confirm") and lower in ["yes", "yeah", "ok", "close", "close session", "end", "end session"]:
-            session_data.pop(user_id, None)
-            return "Thank you for chatting with us! Your session is now closed. If you need anything else, just say hi."
+    # Step 3: Get service/need and use GPT-4 for next step
+    if user["step"] == 3:
+        user["service"] = message_text
+        user["step"] = 4
+        session_data[user_id] = user
 
-        if session.get("waiting_close_confirm"):
-            # If user responds but not 'yes', stay in chat
-            session.pop("waiting_close_confirm", None)
-            session_data[user_id] = session
-            return "No problem! You can ask me anything about our services."
+        # Intelligent check: Should we ask what documents user already has?
+        if should_ask_documents(user["service"]):
+            user["awaiting_documents"] = True
+            session_data[user_id] = user
+            # The question is gentle and "only if needed"
+            return ("For some services, certain certificates or documents are needed. "
+                    "Would you like to share what documents or certificates you already have for this? If not sure, just say 'not sure'.")
+        else:
+            # Go straight to GPT reply (skip document question)
+            return generate_persona_response(user)
 
-        # Normal followup: append to history and respond
-        history = session.get("history", [])
-        history.append({"role": "user", "content": message_text})
-        reply = generate_persona_response(history)
-        history.append({"role": "assistant", "content": reply})
-        session["history"] = history
-        session_data[user_id] = session
-        return reply
+    # Step 4: Get user's available documents/certificates (if relevant)
+    if user.get("awaiting_documents"):
+        user["user_documents"] = message_text
+        user.pop("awaiting_documents")
+        session_data[user_id] = user
+        return generate_persona_response(user)
 
-    # If session is lost or unknown, start over
+    # If reached here, fallback (reset session)
     session_data[user_id] = {"step": 1}
-    return "Hi! I’m Violet. May I know your name? 😊"
+    return "👋 Hello! May I know your name?"
 
-def generate_persona_response(history):
+def should_ask_documents(service_text):
+    """
+    Intelligent check if it's necessary to ask user about existing documents.
+    Only ask for common document-based services, not for everything.
+    """
+    keywords = ["certificate", "id", "card", "proof", "ration", "birth", "income", "caste", "license", "registration", "passport"]
+    text = service_text.lower()
+    return any(kw in text for kw in keywords)
+
+def generate_persona_response(user):
     try:
+        name = user.get('name', '')
+        service = user.get('service', '')
+        for_whom = user.get('other_name', '') if user.get('for_whom') == "other" else name
+        user_docs = user.get('user_documents', '')
+
+        prompt = (
+            "You are a friendly, helpful assistant at Njanambika Tech Spire, a government citizen service centre. "
+            "ONLY answer questions related to government, citizen services, official certificates, applications, and centre support. "
+            "If the user's question is about movies, food, sports, or any other topic, politely say: "
+            "'I’m here to assist with government and citizen services only. Please ask about official certificates or services.' "
+            "Do NOT answer questions outside citizen services. "
+            "Always keep replies under 60 words, use clear, simple language. "
+            "Never explain how to apply online. Only mention who is eligible, what documents are needed, "
+            "and always close with: 'Please visit our centre — we’ll help you with everything.' "
+            "If the user has said which documents they already have, take that into account and give the most relevant suggestion. "
+            "Here are the details:\n"
+            f"- Name: {for_whom}\n"
+            f"- Service: {service}\n"
+            f"- Documents user says they have: {user_docs}\n"
+            "If the user needs something else, answer naturally."
+        )
+
         response = client.chat.completions.create(
             model="gpt-4-1106-preview",
-            messages=history,
+            messages=[{"role": "system", "content": prompt}],
             max_tokens=100,
             temperature=0.4
         )
