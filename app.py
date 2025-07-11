@@ -12,11 +12,11 @@ WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Format phone number
+# Format and validate 15-digit phone number ID
 raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 PHONE_NUMBER_ID = re.sub(r"\D", "", raw_id).zfill(15)[:15]
 
-# Memory
+# Session memory
 abuse_tracker = {}
 session_data = {}
 
@@ -63,10 +63,7 @@ def handle_persona_flow(user_id, message_text):
     user = session_data.get(user_id, {"step": 1})
 
     if user["step"] == 1:
-        # Name check
-        name = message_text
-        if name.lower() in ["hi", "hello", "hey"]:
-            name = "there"
+        name = message_text if message_text.lower() not in ["hi", "hello", "hey"] else "there"
         user["name"] = name
         session_data[user_id] = {**user, "step": 2}
         return f"Nice to meet you, {name}! 😊\nIs this application for *yourself* or *someone else*?"
@@ -99,9 +96,9 @@ def generate_persona_response(user):
             "Skip robotic phrases like 'Dear'. Sound natural, warm, and concise."
         )
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
+            model="gpt-4-1106-preview",
             messages=[{"role": "system", "content": prompt}],
-            max_tokens=200,
+            max_tokens=250,
             temperature=0.5
         )
         return response.choices[0].message.content.strip()
