@@ -12,11 +12,11 @@ WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Format and validate 15-digit phone number ID
+# WhatsApp phone number ID formatting
 raw_id = os.environ.get("PHONE_NUMBER_ID", "").strip()
 PHONE_NUMBER_ID = re.sub(r"\D", "", raw_id).zfill(15)[:15]
 
-# Session memory
+# Session and abuse memory
 abuse_tracker = {}
 session_data = {}
 
@@ -62,44 +62,63 @@ def webhook():
 def handle_persona_flow(user_id, message_text):
     user = session_data.get(user_id, {"step": 1})
 
+    # STEP 1: Ask name
     if user["step"] == 1:
         name = message_text if message_text.lower() not in ["hi", "hello", "hey"] else "there"
         user["name"] = name
         session_data[user_id] = {**user, "step": 2}
         return f"Nice to meet you, {name}! 😊\nIs this application for *yourself* or *someone else*?"
 
+    # STEP 2: For self or someone else?
     if user["step"] == 2:
-        user["for_whom"] = message_text
-        session_data[user_id] = {**user, "step": 3}
-        return "Great! Which service do you need help with? (e.g., income certificate, caste certificate)"
+        if message_text.strip().lower() in ["me", "myself", "self", "mine"]:
+            user["for_whom"] = user["name"]
+            session_data[user_id] = {**user, "step": 3}
+            return "Great! Which service do you need help with? (e.g., income certificate, caste certificate)"
+        else:
+            user["for_whom"] = message_text
+            session_data[user_id] = {**user, "step": 3, "awaiting_other_name": True}
+            return f"May I know their name?"
 
+    # STEP 2.5: If for someone else, ask for their name
+    if user.get("awaiting_other_name"):
+        user["for_whom"] = message_text
+        user.pop("awaiting_other_name", None)
+        session_data[user_id] = {**user, "step": 3}
+        return f"Which service does {message_text} need help with?"
+
+    # STEP 3: Get service/need and generate reply
     if user["step"] == 3:
         user["service"] = message_text
-        session_data[user_id] = {**user, "step": 4}
-        return generate_persona_response(user)
+        reply = generate_persona_response(user)
+        session_data.pop(user_id, None)  # Clear after final response
+        return reply
 
     session_data[user_id] = {"step": 1}
     return "👋 Hello! May I know your name?"
 
 def generate_persona_response(user):
     try:
+        name = user.get('name', '')
+        service = user.get('service', '')
+        for_whom = user.get('for_whom', '')
+
         prompt = (
-            f"You are a warm and helpful assistant for Njanambika Tech Spire. "
-            f"Make your response feel personal and friendly. The person’s name is {user['name']}, "
-            f"applying for {user['service']} for {user['for_whom']}. "
-            "Reply with a human-style summary that includes:\n\n"
-            "🆔 Service\n"
-            "🨾 Eligibility\n"
-            "📁 Required Documents\n"
-            "📆 Last Date (only if it’s genuinely required)\n"
-            "📍 Close with: 'Kindly visit our centre — we’ll help you complete it confidently.'\n\n"
-            "Skip robotic phrases like 'Dear'. Sound natural, warm, and concise."
+            "You are a friendly, helpful assistant at Njanambika Tech Spire, a common service centre. "
+            "Give a short reply (under 50 words) in clear, simple language. "
+            "Never use bullet points or technical words. "
+            "Do NOT explain how to apply online. "
+            "Gently mention who can apply and what main documents are needed, if possible. "
+            "Always finish with: 'Please visit our centre — we’ll help you with everything.' "
+            "Speak naturally, as if to a neighbour. "
+            f"The person's name is {name}, applying for {service} for {for_whom}."
         )
+
         response = client.chat.completions.create(
             model="gpt-4-1106-preview",
             messages=[{"role": "system", "content": prompt}],
-            max_tokens=250,
-            temperature=0.5
+            max_tokens=100,
+            temperature=0.4
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
