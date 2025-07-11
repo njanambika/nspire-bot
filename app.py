@@ -36,11 +36,9 @@ def get_system_prompt(language):
     if language == "ml":
         return (
             "നിങ്ങൾ വൈലറ്റ് ആണ്, ജ്ഞാനാംബിക ടെക്ക് സ്പയറിലെ സൗഹൃദപരമായ സഹായിയാണ്. "
-            "നിങ്ങളുടെ ഉത്തരം മലയാളത്തിൽ മാത്രം നൽകുക. "
-            "സർവീസ് സംബന്ധിച്ച ചോദ്യങ്ങൾക്കും ഉത്തരങ്ങൾക്കും മാത്രം സഹായിക്കുക. "
-            "വിവരം ആവശ്യമെങ്കിൽ വിശദമായി വിശദീകരിക്കാവുന്നതാണ്. "
-            "ഓൺലൈനായി ചെയ്യുന്നത് വിശദമായി പറയരുത്. "
-            "അവസാനം: 'ദയവായി ഞങ്ങളുടെ കേന്ദ്രം സന്ദർശിക്കുക — എല്ലാം സഹായിക്കാം' എന്ന് പറയുക."
+            "സർക്കാർ സർട്ടിഫിക്കറ്റുകൾ, അപേക്ഷകൾ, സേവനങ്ങൾ തുടങ്ങിയവയെക്കുറിച്ചുള്ള ചോദ്യങ്ങൾക്കും മറുപടികൾക്കും മാത്രം സഹായിക്കുക. "
+            "ഓൺലൈൻ വഴി എങ്ങനെ അപേക്ഷിക്കാമെന്നു ഒരിക്കലും പഠിപ്പിക്കരുത്, വിവരങ്ങൾ നൽകിയാലും പോർട്ടൽ ലിങ്കുകൾ, വെബ്‌സൈറ്റ് നമ്പർ എന്നിവ നൽകരുത്. "
+            "അവസാനിപ്പിക്കുമ്പോൾ: 'ദയവായി ഞങ്ങളുടെ കേന്ദ്രം സന്ദർശിക്കുക — എല്ലാം സഹായിക്കാം' എന്ന് ചേർക്കണം."
         )
     else:
         return (
@@ -48,9 +46,9 @@ def get_system_prompt(language):
             "ONLY answer questions related to government, citizen services, official certificates, applications, and centre support. "
             "If the user's question is about movies, food, sports, or any other topic, politely say: "
             "'I’m here to assist with government and citizen services only. Please ask about official certificates or services.' "
-            "Do NOT answer questions outside citizen services. "
+            "NEVER teach, explain, or give steps for online application. NEVER share links or instructions for online portals. "
             "Always keep replies under 60 words, use clear, simple language. "
-            "Never explain how to apply online. Only mention who is eligible, what documents are needed, "
+            "Only mention who is eligible, what documents are needed, "
             "and always close with: 'Please visit our centre — we’ll help you with everything.'"
         )
 
@@ -165,7 +163,7 @@ def handle_conversation(user_id, message_text, message_type="text"):
 
     # Awaiting for_whom
     if step == "awaiting_for_whom":
-        if message_text.strip().lower() in ["myself", "me", "self", "നാൻ", "ഞാൻ", "njyan", "njan", "എനിക്ക്", "സ്വന്തം", "എനിക്ക് വേണ്ടി", "വേറെ ആൾക്ക്", "മറ്റുള്ള", "മറ്റുളളവർക്ക്", "മറ്റൊരാൾക്ക്" ]:
+        if message_text.strip().lower() in ["myself", "me", "self", "നാൻ", "ഞാൻ", "njyan", "njan", "എനിക്ക്", "സ്വന്തം", "എനിക്ക് വേണ്ടി"]:
             user["for_whom"] = "myself"
             user["step"] = "awaiting_service"
             session_data[user_id] = user
