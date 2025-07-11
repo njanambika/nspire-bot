@@ -6,6 +6,7 @@ from openai import OpenAI
 
 app = Flask(__name__)
 
+# ENV VARS
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "").strip()
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -52,43 +53,90 @@ def webhook():
                             send_whatsapp_message(from_number, "⚠️ Please be respectful. We’re here to help.")
                             return "OK", 200
 
-                        response = handle_conversation_memory(from_number, message_text)
+                        response = handle_conversation_flow(from_number, message_text)
                         send_whatsapp_message(from_number, response)
         return "OK", 200
 
-def handle_conversation_memory(user_id, message_text):
-    # --- New: Check if user wants to close session
-    if message_text.strip().lower() in ["yes", "yeah", "ok", "close", "close session", "end", "end session"]:
-        session_data.pop(user_id, None)
-        return "Thank you for chatting with us! Your session is now closed. If you need anything else, just say hi."
+def handle_conversation_flow(user_id, message_text):
+    lower = message_text.strip().lower()
 
-    # Retrieve or initialize the user's conversation history
-    history = session_data.get(user_id, {}).get("history", [])
+    # If user says hi/hello/hey - always start fresh and greet
+    if lower in ["hi", "hello", "hey"]:
+        session_data[user_id] = {"step": 1}
+        return "Hi! I’m Violet. May I know your name? 😊"
 
-    # Add system prompt if starting a new conversation
-    if not history:
-        system_prompt = (
-            "You are a friendly, helpful assistant at Njanambika Tech Spire, a common service centre. "
-            "Always keep replies under 60 words, use clear, simple language. "
-            "Never explain how to apply online. Only mention who is eligible, what documents are needed, "
-            "and always close with: 'Please visit our centre — we’ll help you with everything.' "
-            "Remember everything the user has asked earlier in this chat and answer follow-up questions accordingly."
-        )
-        history.append({"role": "system", "content": system_prompt})
+    session = session_data.get(user_id, {})
 
-    # Add user message to history
-    history.append({"role": "user", "content": message_text})
+    # Step 1: Waiting for name
+    if session.get("step") == 1:
+        name = message_text.strip()
+        session["name"] = name
+        session["step"] = 2
+        session_data[user_id] = session
+        return f"Nice to meet you, {name}! What would you like to know or get help with?"
 
-    # Get AI reply (passing full conversation history)
-    reply = generate_persona_response(history)
-    reply += "\n\nIf you don’t have any more questions, can I close this session?"  # <--- NEW
+    # Step 2: Waiting for need/service/intent
+    if session.get("step") == 2:
+        session["need"] = message_text.strip()
+        session["step"] = 3
+        session_data[user_id] = session
+        return "Is this for yourself or for someone else?"
 
-    history.append({"role": "assistant", "content": reply})
+    # Step 3: Waiting for self/other
+    if session.get("step") == 3:
+        session["for_whom"] = message_text.strip()
+        session["step"] = 99
+        # Prepare the system prompt & first message in the history
+        history = [
+            {"role": "system", "content":
+                "You are a friendly, helpful assistant at Njanambika Tech Spire, a common service centre. "
+                "Always keep replies under 60 words, use clear, simple language. "
+                "Never explain how to apply online. Only mention who is eligible, what documents are needed, "
+                "and always close with: 'Please visit our centre — we’ll help you with everything.' "
+                "Remember everything the user has asked earlier in this chat and answer follow-up questions accordingly."
+            },
+            {"role": "user", "content":
+                f"My name is {session['name']}. I want help with: {session['need']}. It is for: {session['for_whom']}."
+            }
+        ]
+        session["history"] = history
+        session_data[user_id] = session
+        reply = generate_persona_response(history)
+        history.append({"role": "assistant", "content": reply})
+        session["history"] = history
+        session_data[user_id] = session
+        return reply
 
-    # Save back to session_data
-    session_data[user_id] = {"history": history}
+    # Step 99: GPT memory chat for followups
+    if session.get("step") == 99:
+        # Session close logic
+        if lower in ["no", "nothing else", "that’s all", "no more", "all clear"]:
+            session["waiting_close_confirm"] = True
+            session_data[user_id] = session
+            return "Can I close this session now?"
 
-    return reply
+        if session.get("waiting_close_confirm") and lower in ["yes", "yeah", "ok", "close", "close session", "end", "end session"]:
+            session_data.pop(user_id, None)
+            return "Thank you for chatting with us! Your session is now closed. If you need anything else, just say hi."
+
+        if session.get("waiting_close_confirm"):
+            # If user responds but not 'yes', stay in chat
+            session.pop("waiting_close_confirm", None)
+            session_data[user_id] = session
+            return "No problem! You can ask me anything about our services."
+
+        # Normal followup: append to history and respond
+        history = session.get("history", [])
+        history.append({"role": "user", "content": message_text})
+        reply = generate_persona_response(history)
+        history.append({"role": "assistant", "content": reply})
+        session["history"] = history
+        session_data[user_id] = session
+        return reply
+
+    # If session is lost or unknown, start over
+    session_data[user_id] = {"step": 1}
+    return "Hi! I’m Violet. May I know your name? 😊"
 
 def generate_persona_response(history):
     try:
